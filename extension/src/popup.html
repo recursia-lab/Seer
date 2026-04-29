@@ -4,33 +4,73 @@
   <meta charset="UTF-8">
   <title>Seer</title>
   <style>
-    body { font-family: system-ui, sans-serif; width: 280px; padding: 16px; margin: 0; }
-    h1 { font-size: 18px; margin: 0 0 8px; }
-    .tagline { font-size: 12px; color: #666; margin-bottom: 16px; }
-    .status { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
-    .dot { width: 10px; height: 10px; border-radius: 50%; }
-    .dot.ok { background: #22c55e; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      width: 300px;
+      padding: 16px;
+      margin: 0;
+      color: #1e1e2e;
+    }
+    h1 { font-size: 18px; margin: 0 0 4px; display: flex; align-items: center; gap: 6px; }
+    .tagline { font-size: 12px; color: #666; margin: 0 0 16px; }
+    .card {
+      background: #f5f5f7;
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 12px;
+    }
+    .row { display: flex; align-items: center; gap: 8px; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+    .dot.ok  { background: #22c55e; }
     .dot.err { background: #ef4444; }
-    .dot.checking { background: #eab308; }
-    .status-text { font-size: 13px; }
-    .section { margin-bottom: 12px; }
-    label { font-size: 12px; color: #555; display: block; margin-bottom: 4px; }
-    a { color: #3b82f6; font-size: 12px; }
+    .dot.checking { background: #eab308; animation: pulse 1s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+    .status-label { font-size: 13px; font-weight: 600; }
+    .status-detail { font-size: 11px; color: #666; margin-top: 3px; }
+    .btn {
+      display: block;
+      width: 100%;
+      padding: 9px;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      cursor: pointer;
+      text-align: center;
+      text-decoration: none;
+      box-sizing: border-box;
+    }
+    .btn-primary { background: #06d6a0; color: #fff; font-weight: 600; }
+    .btn-secondary { background: #e5e7eb; color: #374151; margin-top: 6px; }
+    .footer { font-size: 11px; color: #999; text-align: center; margin-top: 12px; }
+    .footer a { color: #06d6a0; text-decoration: none; }
   </style>
 </head>
 <body>
   <h1>🔦 Seer</h1>
-  <p class="tagline">Local AI image descriptions for screen readers.</p>
+  <p class="tagline">Local AI image descriptions — no cloud, no API key.</p>
 
-  <div class="status">
-    <div class="dot checking" id="status-dot"></div>
-    <span class="status-text" id="status-text" aria-live="polite">Checking daemon...</span>
+  <div class="card">
+    <div class="row">
+      <div class="dot checking" id="dot" aria-hidden="true"></div>
+      <div>
+        <div class="status-label" id="status-label" aria-live="polite">Checking daemon…</div>
+        <div class="status-detail" id="status-detail"></div>
+      </div>
+    </div>
   </div>
 
-  <div class="section">
-    <label>Daemon: <code>http://127.0.0.1:11435</code></label>
-    <a href="https://github.com/recursia-lab/seer#setup" target="_blank">Setup instructions ↗</a>
-  </div>
+  <a class="btn btn-primary" href="https://github.com/recursia-lab/Seer#setup"
+     target="_blank" id="setup-link" style="display:none">
+    Setup Guide ↗
+  </a>
+  <button class="btn btn-secondary" id="rescan-btn">
+    Re-scan this page
+  </button>
+
+  <p class="footer">
+    <a href="https://github.com/recursia-lab/Seer" target="_blank">recursia-lab/Seer</a>
+    &nbsp;·&nbsp; Apache 2.0
+  </p>
 
   <script src="popup.js"></script>
 </body>

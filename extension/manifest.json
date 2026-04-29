@@ -5,8 +5,15 @@
   "description": "Automatically describes images without alt text using local AI. No API key. No cloud. Fully private.",
   "permissions": [
     "activeTab",
+    "scripting",
     "storage"
   ],
+  "commands": {
+    "describe-focused-image": {
+      "suggested_key": { "default": "Alt+D" },
+      "description": "Describe the focused image"
+    }
+  },
   "host_permissions": [
     "http://127.0.0.1:11435/*"
   ],

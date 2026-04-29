@@ -148,6 +148,20 @@ const observer = new MutationObserver((mutations) => {
   }
 });
 
+// Re-scan when triggered from popup
+window.addEventListener("seer-rescan", scanPage);
+
+// Alt+D: describe the currently focused image
+document.addEventListener("keydown", (e) => {
+  if (e.altKey && e.key === "d") {
+    const focused = document.activeElement;
+    if (focused && focused.tagName === "IMG") {
+      focused.removeAttribute(PROCESSED_ATTR);
+      processImage(focused);
+    }
+  }
+});
+
 // Start
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", () => {
