@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Seer</title>
+  <style>
+    body { font-family: system-ui, sans-serif; width: 280px; padding: 16px; margin: 0; }
+    h1 { font-size: 18px; margin: 0 0 8px; }
+    .tagline { font-size: 12px; color: #666; margin-bottom: 16px; }
+    .status { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; }
+    .dot.ok { background: #22c55e; }
+    .dot.err { background: #ef4444; }
+    .dot.checking { background: #eab308; }
+    .status-text { font-size: 13px; }
+    .section { margin-bottom: 12px; }
+    label { font-size: 12px; color: #555; display: block; margin-bottom: 4px; }
+    a { color: #3b82f6; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h1>🔦 Seer</h1>
+  <p class="tagline">Local AI image descriptions for screen readers.</p>
+
+  <div class="status">
+    <div class="dot checking" id="status-dot"></div>
+    <span class="status-text" id="status-text" aria-live="polite">Checking daemon...</span>
+  </div>
+
+  <div class="section">
+    <label>Daemon: <code>http://127.0.0.1:11435</code></label>
+    <a href="https://github.com/recursia-lab/seer#setup" target="_blank">Setup instructions ↗</a>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
