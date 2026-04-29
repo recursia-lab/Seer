@@ -1,9 +1,9 @@
 """
 Seer daemon — local AI image description server for screen readers.
-Wraps llama-mtmd-cli (llama.cpp + PaliGemma2) behind a simple HTTP API.
 
-Usage:
-    python server.py --model pali2-text.gguf --mmproj pali2-mmproj.gguf
+Supports two backends:
+  --backend llama-cli   Uses llama-mtmd-cli binary (PaliGemma2 GGUF, fastest)
+  --backend ollama      Uses Ollama HTTP API (llava / moondream / paligemma2)
 
 API:
     POST /describe   {"image_url": "..."} or {"image_b64": "..."}
@@ -12,6 +12,7 @@ API:
 
 import argparse
 import base64
+import json
 import subprocess
 import tempfile
 import time
@@ -26,7 +27,6 @@ from pydantic import BaseModel
 
 app = FastAPI(title="Seer", description="Local AI image descriptions for screen readers")
 
-# Allow browser extension to call localhost
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -36,12 +36,15 @@ app.add_middleware(
 
 cfg = {}
 
+# Models that need raw prompt (no chat template) — PaliGemma family
+_PALIGEMMA_NAMES = {"paligemma", "paligemma2", "pali2"}
+
 
 class DescribeRequest(BaseModel):
     image_url: str | None = None
     image_b64: str | None = None
-    task: str = "caption"       # "caption" or "vqa"
-    question: str | None = None # used when task="vqa"
+    task: str = "caption"
+    question: str | None = None
     lang: str = "en"
 
 
@@ -52,8 +55,6 @@ class DescribeResponse(BaseModel):
 
 
 def _build_prompt(task: str, question: str | None, lang: str) -> str:
-    # PaliGemma2 requires task prefix + language + \n at the end
-    # Correct format: "caption en\n" or "answer en What is this?\n"
     if task == "vqa" and question:
         return f"answer {lang} {question}\n"
     return f"caption {lang}\n"
@@ -69,12 +70,73 @@ def _fetch_image(url: str, dest: str) -> None:
         raise HTTPException(400, f"Failed to fetch image: {e}")
 
 
+def _get_image_b64(tmp_path: str) -> str:
+    with open(tmp_path, "rb") as f:
+        return base64.b64encode(f.read()).decode()
+
+
+def _run_llama_cli(tmp_path: str, prompt: str) -> str:
+    result = subprocess.run(
+        [
+            cfg["llama_cli"],
+            "-m", cfg["model"],
+            "--mmproj", cfg["mmproj"],
+            "--image", tmp_path,
+            "-p", prompt,
+            "-n", "48",
+            "--repeat-penalty", "1.3",
+            "--no-warmup",
+            "-t", str(cfg.get("threads", 4)),
+        ],
+        capture_output=True, text=True, timeout=180,
+    )
+    text = result.stdout.strip()
+    if not text:
+        raise HTTPException(500, f"llama-cli returned no output. stderr: {result.stderr[-300:]}")
+    return text
+
+
+def _run_ollama(tmp_path: str, prompt: str) -> str:
+    model = cfg["ollama_model"]
+    is_paligemma = any(p in model.lower() for p in _PALIGEMMA_NAMES)
+
+    payload = {
+        "model": model,
+        "prompt": prompt,
+        "images": [_get_image_b64(tmp_path)],
+        "stream": False,
+    }
+    # PaliGemma2 needs raw mode to bypass Ollama's chat template
+    if is_paligemma:
+        payload["raw"] = True
+
+    data = json.dumps(payload).encode()
+    req = urllib.request.Request(
+        f"{cfg['ollama_url']}/api/generate",
+        data=data,
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=180) as r:
+            resp = json.loads(r.read())
+    except urllib.error.URLError as e:
+        raise HTTPException(502, f"Ollama unreachable: {e}")
+
+    text = resp.get("response", "").strip()
+    if not text:
+        raise HTTPException(500, f"Ollama returned empty response")
+    return text
+
+
 @app.get("/health")
 def health():
+    backend = cfg.get("backend", "llama-cli")
+    if backend == "ollama":
+        return {"status": "ok", "model": cfg.get("ollama_model", ""), "backend": "ollama"}
     return {
         "status": "ok",
         "model": Path(cfg.get("model", "")).name,
-        "mmproj": Path(cfg.get("mmproj", "")).name,
+        "backend": "llama-cli",
     }
 
 
@@ -103,32 +165,16 @@ def describe(req: DescribeRequest):
     try:
         prompt = _build_prompt(req.task, req.question, req.lang)
         t0 = time.time()
-        result = subprocess.run(
-            [
-                cfg["llama_cli"],
-                "-m", cfg["model"],
-                "--mmproj", cfg["mmproj"],
-                "--image", tmp_path,
-                "-p", prompt,
-                "-n", "48",
-                "--repeat-penalty", "1.3",
-                "--no-warmup",
-                "-t", str(cfg.get("threads", 4)),
-            ],
-            capture_output=True, text=True, timeout=180
-        )
+
+        if cfg.get("backend") == "ollama":
+            description = _run_ollama(tmp_path, prompt)
+            model_name = cfg.get("ollama_model", "ollama")
+        else:
+            description = _run_llama_cli(tmp_path, prompt)
+            model_name = Path(cfg["model"]).name
+
         elapsed = int((time.time() - t0) * 1000)
-
-        description = result.stdout.strip()
-        if not description:
-            stderr_tail = result.stderr[-300:] if result.stderr else ""
-            raise HTTPException(500, f"Model returned no output. stderr: {stderr_tail}")
-
-        return DescribeResponse(
-            description=description,
-            time_ms=elapsed,
-            model=Path(cfg["model"]).name,
-        )
+        return DescribeResponse(description=description, time_ms=elapsed, model=model_name)
 
     finally:
         try:
@@ -139,25 +185,46 @@ def describe(req: DescribeRequest):
 
 def main():
     parser = argparse.ArgumentParser(description="Seer daemon — local AI image descriptions")
-    parser.add_argument("--model", required=True, help="Path to PaliGemma2 text GGUF")
-    parser.add_argument("--mmproj", required=True, help="Path to PaliGemma2 mmproj GGUF")
-    parser.add_argument("--llama-cli", default="llama-mtmd-cli",
-                        help="Path to llama-mtmd-cli binary (default: llama-mtmd-cli in PATH)")
-    parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=11435)
-    parser.add_argument("--threads", type=int, default=4, help="CPU threads for inference")
+    sub = parser.add_subparsers(dest="backend")
+
+    # llama-cli backend (PaliGemma2 GGUF)
+    p_llama = sub.add_parser("llama-cli", help="Use llama-mtmd-cli binary")
+    p_llama.add_argument("--model", required=True, help="Path to PaliGemma2 text GGUF")
+    p_llama.add_argument("--mmproj", required=True, help="Path to PaliGemma2 mmproj GGUF")
+    p_llama.add_argument("--llama-cli", default="llama-mtmd-cli",
+                         help="Path to llama-mtmd-cli binary")
+    p_llama.add_argument("--threads", type=int, default=4)
+
+    # Ollama backend (llava / moondream / paligemma2)
+    p_ollama = sub.add_parser("ollama", help="Use Ollama HTTP API")
+    p_ollama.add_argument("--model", default="moondream",
+                          help="Ollama model name (e.g. moondream, llava, paligemma2)")
+    p_ollama.add_argument("--ollama-url", default="http://127.0.0.1:11434")
+
+    for p in (p_llama, p_ollama):
+        p.add_argument("--host", default="127.0.0.1")
+        p.add_argument("--port", type=int, default=11435)
+
     args = parser.parse_args()
 
-    cfg["model"] = args.model
-    cfg["mmproj"] = args.mmproj
-    cfg["llama_cli"] = args.llama_cli
-    cfg["threads"] = args.threads
+    if args.backend is None:
+        parser.print_help()
+        return
 
-    print(f"Seer daemon v0.1.0")
-    print(f"  model:   {Path(args.model).name}")
-    print(f"  mmproj:  {Path(args.mmproj).name}")
-    print(f"  listen:  http://{args.host}:{args.port}")
-    print(f"  threads: {args.threads}")
+    cfg["backend"] = args.backend
+
+    if args.backend == "llama-cli":
+        cfg["model"] = args.model
+        cfg["mmproj"] = args.mmproj
+        cfg["llama_cli"] = args.llama_cli
+        cfg["threads"] = args.threads
+        print(f"Seer daemon  backend=llama-cli  model={Path(args.model).name}")
+    else:
+        cfg["ollama_model"] = args.model
+        cfg["ollama_url"] = args.ollama_url
+        print(f"Seer daemon  backend=ollama  model={args.model}  url={args.ollama_url}")
+
+    print(f"  listening on http://{args.host}:{args.port}")
 
     import uvicorn
     uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
